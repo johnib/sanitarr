@@ -7,7 +7,7 @@
 //! # Deletion Workflow
 //!
 //! 1. Query Jellyfin for watched episodes matching retention period criteria
-//! 2. Group episodes by TVDB ID (series identifier)
+//! 2. Group episodes by Jellyfin series ID
 //! 3. For each series:
 //!    - Check if series has forbidden tags (if found, skip entire series)
 //!    - Fetch all episodes from Sonarr for the series
@@ -36,13 +36,16 @@
 //!
 //! # Field Requirements
 //!
-//! Jellyfin must provide these fields for episodes:
-//! - `ProviderIds.Tvdb` - Series TVDB ID for Sonarr lookup
+//! **From Jellyfin:**
+//! - `SeriesId` - Series ID to fetch the series object
 //! - `ParentIndexNumber` - Season number
 //! - `IndexNumber` - Episode number
 //! - `UserData.LastPlayedDate` - For retention period filtering
 //!
-//! If any required field is missing, the episode is skipped with a warning log.
+//! **From Jellyfin Series object:**
+//! - `ProviderIds.Tvdb` - Series TVDB ID for Sonarr lookup
+//!
+//! If any required field is missing, the episode/series is skipped with a warning log.
 
 use crate::{
     cleaners::utils,
@@ -282,17 +285,17 @@ impl EpisodesCleaner {
         &self,
         jellyfin_episodes: &[Item],
     ) -> anyhow::Result<Vec<EpisodeFileDeletion>> {
-        // Group episodes by TVDB ID (series identifier)
-        let mut by_tvdb: HashMap<String, Vec<&Item>> = HashMap::new();
+        // ✅ FIX: Group episodes by Jellyfin series ID (not episode TVDB ID)
+        let mut by_series_id: HashMap<String, Vec<&Item>> = HashMap::new();
         for ep in jellyfin_episodes {
-            if let Some(tvdb_id) = ep.tvdb_id() {
-                by_tvdb
-                    .entry(tvdb_id.to_string())
+            if let Some(series_id) = ep.series_jellyfin_id() {
+                by_series_id
+                    .entry(series_id.to_string())
                     .or_insert_with(Vec::new)
                     .push(ep);
             } else {
                 warn!(
-                    "Episode '{}' has no TVDB ID, cannot match to Sonarr series, skipping",
+                    "Episode '{}' has no series ID, cannot match to Sonarr series, skipping",
                     ep.name
                 );
             }
@@ -301,25 +304,50 @@ impl EpisodesCleaner {
         let mut files_to_delete = Vec::new();
         let forbidden_tags = self.forbidden_tags().await?;
 
-        for (tvdb_id, jellyfin_episodes) in by_tvdb {
-            // Get Sonarr series by TVDB ID
-            let series_list = self.sonarr_client.series_by_tvdb_id(&tvdb_id).await?;
-
-            for series in series_list {
-                // Check if series has forbidden tags
-                if Self::has_forbidden_tags(&series, &forbidden_tags) {
-                    debug!(
-                        "Series {} has forbidden tags, skipping all episodes",
-                        series.title
-                    );
+        for (jellyfin_series_id, jellyfin_episodes) in by_series_id {
+            // ✅ FIX: Query Jellyfin to get the series' TVDB ID
+            let jellyfin_series = match self.jellyfin.series_by_id(&jellyfin_series_id).await {
+                Ok(series) => series,
+                Err(e) => {
+                    warn!("Failed to fetch series {} from Jellyfin: {}", jellyfin_series_id, e);
                     continue;
                 }
+            };
 
-                // Get ALL episodes for this series from Sonarr
-                let sonarr_episodes = self.sonarr_client.episodes_by_series(series.id).await?;
+            // Get series TVDB ID from the series object (not from episodes!)
+            let Some(series_tvdb_id) = jellyfin_series.tvdb_id() else {
+                warn!(
+                    "Series '{}' has no TVDB ID in Jellyfin, skipping episodes",
+                    jellyfin_series.name
+                );
+                continue;
+            };
 
-                // For each Jellyfin watched episode, find matching Sonarr episode
-                for jellyfin_ep in &jellyfin_episodes {
+            debug!("Processing episodes from Jellyfin series: {} (TVDB ID: {})", jellyfin_series.name, series_tvdb_id);
+
+            // ✅ Now query Sonarr with the correct series TVDB ID
+            let series_list = self.sonarr_client.series_by_tvdb_id(series_tvdb_id).await?;
+
+            // Get the first (and usually only) series result
+            let Some(series) = series_list.first() else {
+                warn!("Series with TVDB ID {} not found in Sonarr, skipping episodes", series_tvdb_id);
+                continue;
+            };
+
+            // Check if series has forbidden tags
+            if Self::has_forbidden_tags(series, &forbidden_tags) {
+                debug!(
+                    "Series {} has forbidden tags, skipping all episodes",
+                    series.title
+                );
+                continue;
+            }
+
+            // Get ALL episodes for this series from Sonarr
+            let sonarr_episodes = self.sonarr_client.episodes_by_series(series.id).await?;
+
+            // For each Jellyfin watched episode, find matching Sonarr episode
+            for jellyfin_ep in &jellyfin_episodes {
                     let season = jellyfin_ep.season_number();
                     let episode = jellyfin_ep.episode_number();
 
@@ -382,7 +410,6 @@ impl EpisodesCleaner {
                         }
                     }
                 }
-            }
         }
 
         Ok(files_to_delete)

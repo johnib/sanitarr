@@ -71,6 +71,28 @@ impl JellyfinClient {
             .find(|user| user.name == user_name)
             .ok_or_else(|| anyhow::anyhow!("User {user_name} not found"))
     }
+
+    /// Get series by Jellyfin series ID
+    /// https://api.jellyfin.org/#tag/Items/operation/GetItems
+    pub async fn series_by_id(&self, series_id: &str) -> anyhow::Result<Item> {
+        let url = self.base_url.join("Items")?;
+        let response = self
+            .client
+            .get(url)
+            .query(&[("ids", series_id), ("fields", "ProviderIds")])
+            .send()
+            .await?
+            .handle_error()
+            .await?
+            .json::<ItemsResponse>()
+            .await?;
+
+        response
+            .items
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Series with ID {} not found", series_id))
+    }
 }
 
 fn auth_headers(api_key: &str) -> Result<HeaderMap, anyhow::Error> {
