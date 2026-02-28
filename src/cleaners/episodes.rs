@@ -48,7 +48,6 @@
 //! If any required field is missing, the episode/series is skipped with a warning log.
 
 use crate::{
-    cleaners::utils,
     config::SonarrConfig,
     http::{EpisodeInfo, Item, ItemsFilter, JellyfinClient, SeriesInfo, SonarrClient},
     services::DownloadService,
@@ -291,7 +290,7 @@ impl EpisodesCleaner {
             if let Some(series_id) = ep.series_jellyfin_id() {
                 by_series_id
                     .entry(series_id.to_string())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(ep);
             } else {
                 warn!(
@@ -354,14 +353,14 @@ impl EpisodesCleaner {
                     // Validate that we have season and episode numbers
                     let (season_num, ep_num) = match (season, episode) {
                         (Some(s), Some(e)) => (s, e),
-                        (None, Some(e)) => {
+                        (None, Some(_)) => {
                             warn!(
                                 "Episode '{}' from series {} missing season number, skipping",
                                 jellyfin_ep.name, series.title
                             );
                             continue;
                         }
-                        (Some(s), None) => {
+                        (Some(_), None) => {
                             warn!(
                                 "Episode '{}' from series {} missing episode number, skipping",
                                 jellyfin_ep.name, series.title
