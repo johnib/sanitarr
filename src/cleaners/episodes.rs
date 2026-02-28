@@ -49,7 +49,7 @@
 
 use crate::{
     config::SonarrConfig,
-    http::{EpisodeInfo, Item, ItemsFilter, JellyfinClient, SeriesInfo, SonarrClient},
+    http::{Item, ItemsFilter, JellyfinClient, SeriesInfo, SonarrClient},
     services::DownloadService,
 };
 use log::{debug, info, warn};

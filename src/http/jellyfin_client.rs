@@ -113,16 +113,16 @@ pub struct ItemsResponse {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 #[cfg_attr(test, derive(Default))]
+#[allow(dead_code)]
 pub struct Item {
     pub name: String,
     pub id: String,
     pub provider_ids: Option<ProviderIds>,
     pub user_data: Option<ItemUserData>,
-    // Episode-specific fields (only present for Episode items)
-    pub parent_index_number: Option<u32>,  // Season number
-    pub index_number: Option<u32>,         // Episode number
-    pub series_id: Option<String>,         // Parent series ID (for episodes)
-    pub series_name: Option<String>,       // Parent series name (for display)
+    pub parent_index_number: Option<u32>,
+    pub index_number: Option<u32>,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
 }
 
 impl Item {
@@ -219,6 +219,7 @@ impl<'a> ItemsFilter<'a> {
     }
 
     #[must_use]
+    #[allow(dead_code)]
     pub fn parent_id(mut self, parent_id: &'a str) -> Self {
         self.parent_id = Some(parent_id);
         self
